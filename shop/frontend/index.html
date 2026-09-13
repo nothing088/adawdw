@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Магазин</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#111;--muted:#777;--accent:#111}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif}
+header{padding:18px 16px 8px;font-size:25px;font-weight:800}
+.wrap{padding:8px 14px 100px;max-width:1000px;margin:auto}
+.search,.input,select,textarea{width:100%;padding:13px;border:1px solid #ddd;border-radius:13px;background:#fff;margin:5px 0;font-size:15px}
+textarea{min-height:100px;resize:vertical}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media(min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.card,.panel{background:var(--card);border-radius:18px;padding:12px;box-shadow:0 2px 12px #0000000b;margin:10px 0}
+.card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px;background:#eee}
+.price{font-size:17px;font-weight:800;margin-top:7px}
+.muted{color:var(--muted);font-size:13px}
+.btn{border:0;border-radius:12px;background:var(--accent);color:#fff;padding:12px 14px;width:100%;font-weight:700;cursor:pointer;margin-top:8px}
+.btn.secondary{background:#e9eaed;color:#111}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #eee;display:flex;justify-content:space-around;padding:8px 4px;z-index:5}
+.nav button{border:0;background:transparent;padding:8px;font-size:12px}
+.cart{position:fixed;left:14px;right:14px;bottom:64px;background:#111;color:#fff;padding:14px;border-radius:15px;text-align:center;font-weight:800;z-index:4}
+.badge{display:inline-block;padding:5px 8px;border-radius:9px;background:#eee;font-size:12px}
+h2,h3{margin:8px 0}
+.hidden{display:none!important}
+.admin-tabs{display:flex;gap:6px;overflow:auto;margin-bottom:10px}
+.admin-tabs button{white-space:nowrap;width:auto;padding:9px 12px}
+.item{border-bottom:1px solid #eee;padding:10px 0}
+</style>
+</head>
+<body>
+<header>🛍 Магазин</header>
+<div class="wrap" id="app"></div>
+<div class="cart" id="cart" onclick="checkout()">Корзина: 0 ₽</div>
+<div class="nav">
+<button onclick="loadCatalog()">🏪<br>Магазин</button>
+<button onclick="loadOrders()">📦<br>Заказы</button>
+<button onclick="profile()">👤<br>Профиль</button>
+<button onclick="support()">💬<br>Поддержка</button>
+</div>
+<script>
+const tg=window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+const H=()=>({'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''});
+let products=[],delivery=[],cart={};
+
+async function api(url,opt={}){
+  opt.headers={...(opt.headers||{}),...H()};
+  const r=await fetch(url,opt);
+  if(!r.ok){let t=await r.text();throw new Error(t)}
+  return r.json();
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function cartTotal(){
+  return Object.entries(cart).reduce((sum,[id,q])=>{
+    const p=products.find(x=>x.id===id); return sum+(p?p.price*q:0)
+  },0)
+}
+function updateCart(){
+  document.getElementById('cart').textContent=`Корзина: ${cartTotal().toFixed(2)} ₽`;
+}
+async function loadCatalog(){
+  const d=await api('/api/catalog'); products=d.products; delivery=d.delivery;
+  document.getElementById('app').innerHTML=`
+    <input class="search" placeholder="Поиск товаров" oninput="filterProducts(this.value)">
+    <div class="grid" id="grid"></div>`;
+  renderProducts(products); updateCart();
+}
+function renderProducts(arr){
+  document.getElementById('grid').innerHTML=arr.map(p=>`
+    <div class="card">
+      ${p.image_url?`<img src="${p.image_url}">`:`<div style="aspect-ratio:1;background:#eee;border-radius:14px;display:grid;place-items:center">🛍️</div>`}
+      <b>${esc(p.name)}</b>
+      <div class="muted">${esc(p.description)}</div>
+      <div class="price">${p.price.toFixed(2)} ₽</div>
+      <div class="muted">Остаток: ${p.stock}</div>
+      <button class="btn" onclick="add('${p.id}')">Добавить</button>
+    </div>`).join('');
+}
+function filterProducts(q){
+  const x=q.toLowerCase(); renderProducts(products.filter(p=>(p.name+' '+p.description).toLowerCase().includes(x)))
+}
+function add(id){
+  const p=products.find(x=>x.id===id);
+  if(!p)return;
+  if((cart[id]||0)>=p.stock)return alert('Больше нет на складе');
+  cart[id]=(cart[id]||0)+1; updateCart();
+}
+async function checkout(){
+  if(!Object.keys(cart).length)return alert('Корзина пуста');
+  document.getElementById('app').innerHTML=`
+  <div class="panel"><h2>Оформление заказа</h2>
+  ${Object.entries(cart).map(([id,q])=>{const p=products.find(x=>x.id===id);return `<div class="item"><b>${esc(p.name)}</b> × ${q}<br>${(p.price*q).toFixed(2)} ₽</div>`}).join('')}
+  <input id="email" class="input" type="email" placeholder="Email для чека">
+  <input id="city" class="input" placeholder="Город">
+  <input id="street" class="input" placeholder="Улица">
+  <input id="house" class="input" placeholder="Дом">
+  <input id="apt" class="input" placeholder="Квартира">
+  <input id="postal" class="input" placeholder="Индекс">
+  <select id="delivery">${delivery.map(d=>`<option value="${d.id}">${esc(d.name)} — ${d.price.toFixed(2)} ₽</option>`).join('')}</select>
+  <input id="promo" class="input" placeholder="Промокод">
+  <textarea id="comment" placeholder="Комментарий к заказу"></textarea>
+  <button class="btn" onclick="pay()">Перейти к оплате</button>
+  <button class="btn secondary" onclick="loadCatalog()">Назад</button>
+  </div>`;
+}
+async function pay(){
+  try{
+    const items=Object.entries(cart).map(([product_id,quantity])=>({product_id,quantity}));
+    const r=await api('/api/orders',{method:'POST',body:JSON.stringify({
+      items,
+      email:document.getElementById('email').value,
+      city:document.getElementById('city').value,
+      street:document.getElementById('street').value,
+      house:document.getElementById('house').value,
+      apartment:document.getElementById('apt').value,
+      postal_code:document.getElementById('postal').value,
+      delivery_id:document.getElementById('delivery').value,
+      promo_code:document.getElementById('promo').value,
+      comment:document.getElementById('comment').value
+    })});
+    location.href=r.confirmation_url;
+  }catch(e){alert(e.message)}
+}
+async function loadOrders(){
+  const d=await api('/api/orders');
+  document.getElementById('app').innerHTML=`<h2>Мои заказы</h2>`+(d.length?d.map(o=>`
+  <div class="panel" onclick="orderDetail('${o.order_id}')">
+    <b>#${o.order_id}</b><br><span class="badge">${esc(o.status)}</span>
+    <div>${o.total.toFixed(2)} ₽</div>
+    <div class="muted">${new Date(o.created_at).toLocaleString()}</div>
+  </div>`).join(''):'<div class="panel">Заказов пока нет.</div>');
+}
+async function orderDetail(id){
+  const o=await api('/api/orders/'+id);
+  document.getElementById('app').innerHTML=`<div class="panel"><h2>Заказ #${o.order_id}</h2>
+  <span class="badge">${esc(o.status)}</span>
+  ${o.items.map(x=>`<div class="item">${esc(x.name)} × ${x.quantity} — ${x.total.toFixed(2)} ₽</div>`).join('')}
+  <p>Товары: ${o.subtotal.toFixed(2)} ₽</p>
+  <p>Доставка: ${o.delivery_price.toFixed(2)} ₽</p>
+  <p>Скидка: ${o.discount.toFixed(2)} ₽</p>
+  <h3>Итого: ${o.total.toFixed(2)} ₽</h3>
+  <p>${esc(o.city)} ${esc(o.street)} ${esc(o.house)} ${esc(o.apartment)}</p>
+  <button class="btn" onclick="loadOrders()">Назад</button></div>`;
+}
+async function profile(){
+  const u=await api('/api/me');
+  document.getElementById('app').innerHTML=`<div class="panel"><h2>Профиль</h2>
+  <b>${esc(u.first_name||'')}</b><br>@${esc(u.username||'')}</div>`;
+}
+function support(){
+  document.getElementById('app').innerHTML=`<div class="panel"><h2>Поддержка</h2>
+  <textarea id="supportMsg" placeholder="Опишите проблему"></textarea>
+  <button class="btn" onclick="sendSupport()">Отправить</button></div>`;
+}
+async function sendSupport(){
+  await api('/api/support',{method:'POST',body:JSON.stringify({message:document.getElementById('supportMsg').value})});
+  alert('Сообщение отправлено'); profile();
+}
+loadCatalog();
+</script>
+</body>
+</html>
