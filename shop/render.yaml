@@ -3,8 +3,10 @@ services:
     name: telegram-shop
     runtime: docker
     plan: starter
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
+
     envVars:
       - key: BOT_TOKEN
         sync: false
