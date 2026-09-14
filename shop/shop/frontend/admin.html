@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Админка</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f5f6f8;margin:0;color:#111}
+.wrap{max-width:1100px;margin:auto;padding:20px}
+.panel{background:#fff;border-radius:16px;padding:16px;margin:12px 0}
+input,select,textarea{padding:11px;border:1px solid #ddd;border-radius:10px;width:100%;box-sizing:border-box;margin:4px 0}
+button{border:0;background:#111;color:#fff;padding:10px 14px;border-radius:10px;margin:4px;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.card{background:#fff;border-radius:14px;padding:14px}
+table{width:100%;border-collapse:collapse;background:#fff}
+td,th{padding:9px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+@media(max-width:700px){.grid{grid-template-columns:1fr 1fr}table{font-size:12px}}
+</style>
+</head>
+<body><div class="wrap">
+<h1>🛠 Админ-панель</h1>
+<div id="login" class="panel"><input id="secret" type="password" placeholder="ADMIN_SECRET"><button onclick="login()">Войти</button></div>
+<div id="admin" style="display:none">
+<div class="grid" id="stats"></div>
+<div class="panel">
+<button onclick="tab('products')">Товары</button><button onclick="tab('orders')">Заказы</button>
+<button onclick="tab('delivery')">Доставка</button><button onclick="tab('promos')">Промокоды</button>
+<button onclick="tab('support')">Поддержка</button>
+</div>
+<div id="content"></div></div></div>
+<script>
+let token=localStorage.admin_secret||'';
+function h(){return {'Content-Type':'application/json','X-Admin-Secret':token}}
+async function api(u,o={}){o.headers={...(o.headers||{}),...h()};let r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+async function login(){token=document.getElementById('secret').value;localStorage.admin_secret=token;try{await api('/api/admin/stats');document.getElementById('login').style.display='none';document.getElementById('admin').style.display='block';loadStats();tab('products')}catch(e){alert('Неверный секрет')}}
+async function loadStats(){let s=await api('/api/admin/stats');document.getElementById('stats').innerHTML=Object.entries(s).map(([k,v])=>`<div class="card"><b>${k}</b><h2>${v}</h2></div>`).join('')}
+async function tab(t){
+ if(t==='products')return products();
+ if(t==='orders')return orders();
+ if(t==='delivery')return delivery();
+ if(t==='promos')return promos();
+ if(t==='support')return support();
+}
+async function products(){
+let d=await api('/api/admin/products');
+document.getElementById('content').innerHTML=`<div class="panel"><h2>Новый товар</h2>
+<input id="pn" placeholder="Название"><textarea id="pd" placeholder="Описание"></textarea>
+<input id="pp" type="number" step=".01" placeholder="Цена"><input id="ps" type="number" placeholder="Остаток">
+<input id="pf" type="file" accept="image/jpeg,image/png,image/webp">
+<button onclick="addProduct()">Добавить</button></div>
+<div class="panel"><h2>Товары</h2>${d.map(p=>`<div style="border-bottom:1px solid #eee;padding:10px">
+<b>${esc(p.name)}</b> — ${p.price} ₽ — остаток ${p.stock}
+<button onclick="editProduct('${p.id}',${p.price},${p.stock},${p.active})">Изменить</button>
+<button onclick="delProduct('${p.id}')">Скрыть</button></div>`).join('')}</div>`}
+async function addProduct(){
+let image=null,f=document.getElementById('pf').files[0];
+if(f){let fd=new FormData();fd.append('file',f);let r=await fetch('/api/admin/upload',{method:'POST',headers:{'X-Admin-Secret':token},body:fd});image=(await r.json()).file_id}
+await api('/api/admin/products',{method:'POST',body:JSON.stringify({name:pn.value,description:pd.value,price:+pp.value,stock:+ps.value,image_file_id:image})});products();loadStats()}
+async function editProduct(id,price,stock,active){let p=prompt('Новая цена',price);if(p===null)return;let s=prompt('Новый остаток',stock);if(s===null)return;await api('/api/admin/products/'+id,{method:'PUT',body:JSON.stringify({price:+p,stock:+s,active})});products();loadStats()}
+async function delProduct(id){await api('/api/admin/products/'+id,{method:'DELETE'});products();loadStats()}
+async function orders(){
+let d=await api('/api/admin/orders');document.getElementById('content').innerHTML=`<div class="panel"><h2>Заказы</h2><input id="oq" placeholder="Поиск"><button onclick="ordersSearch()">Найти</button>
+<table><tr><th>Заказ</th><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Адрес</th></tr>
+${d.map(o=>`<tr><td><b>#${o.order_id}</b><br>${o.created_at}</td><td>${esc(o.username)}<br>${o.tg_id}<br>${esc(o.customer_email)}</td><td>${o.total} ₽<br>${o.items.map(x=>esc(x.name)+' × '+x.quantity).join('<br>')}</td>
+<td><select onchange="setStatus('${o.order_id}',this.value)">${['waiting_payment','paid','processing','shipped','delivered','cancelled'].map(s=>`<option ${s===o.status?'selected':''}>${s}</option>`).join('')}</select></td>
+<td>${esc(o.city)} ${esc(o.street)} ${esc(o.house)} ${esc(o.apartment)}<br>${esc(o.comment)}</td></tr>`).join('')}</table></div>`}
+async function ordersSearch(){let q=oq.value;let d=await api('/api/admin/orders?q='+encodeURIComponent(q));alert('Найдено: '+d.length)}
+async function setStatus(id,status){await api('/api/admin/orders/'+id+'/status',{method:'PUT',body:JSON.stringify({status})});alert('Статус изменён')}
+async function delivery(){
+let d=await api('/api/admin/delivery');document.getElementById('content').innerHTML=`<div class="panel"><h2>Добавить доставку</h2><input id="dn" placeholder="Название"><input id="dp" type="number" step=".01" placeholder="Цена"><button onclick="addDelivery()">Добавить</button></div><div class="panel">${d.map(x=>`<p><b>${esc(x.name)}</b> — ${x.price} ₽</p>`).join('')}</div>`}
+async function addDelivery(){await api('/api/admin/delivery',{method:'POST',body:JSON.stringify({name:dn.value,price:+dp.value})});delivery()}
+async function promos(){
+let d=await api('/api/admin/promos');document.getElementById('content').innerHTML=`<div class="panel"><h2>Промокод</h2><input id="pc" placeholder="КОД"><input id="ppct" type="number" placeholder="% скидки"><input id="pmax" type="number" placeholder="Макс. использований"><input id="pmin" type="number" placeholder="Мин. заказ"><button onclick="addPromo()">Создать</button></div><div class="panel">${d.map(x=>`<p><b>${x.code}</b> — ${x.percent}% — ${x.uses}/${x.max_uses||'∞'}</p>`).join('')}</div>`}
+async function addPromo(){await api('/api/admin/promos',{method:'POST',body:JSON.stringify({code:pc.value,percent:+ppct.value,max_uses:pmax.value?+pmax.value:null,min_order:+pmin.value||0})});promos()}
+async function support(){let d=await api('/api/admin/support');document.getElementById('content').innerHTML='<div class="panel"><h2>Поддержка</h2>'+d.map(x=>`<p><b>@${esc(x.username)}</b> (${x.tg_id})<br>${esc(x.message)}<br><small>${x.created_at}</small></p><hr>`).join('')+'</div>'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]) )}
+if(token){document.getElementById('secret').value=token;login()}
+</script></body></html>
